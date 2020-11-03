@@ -2,12 +2,22 @@
 
 #include <Windows.h>
 #include <DbgHelp.h>
+#include <TlHelp32.h>
 
 #include <string>
 #include <assert.h>
 
 MiniDumpper::MiniDumpper(int pid)
 {
+    m_dwProcessId = pid;
+}
+
+MiniDumpper::MiniDumpper(const std::wstring &name)
+{
+    int pid = wcstol(name.c_str(), nullptr, 10);
+    if (pid == 0)
+        pid = FindProcessId(name);
+    wprintf(TEXT("MiniDumpper pid: %d\n"), pid);
     m_dwProcessId = pid;
 }
 
@@ -32,8 +42,9 @@ bool MiniDumpper::CreateMiniDump()
     SYSTEMTIME st;
     GetLocalTime(&st);
 
-    std::wstring sMinidumpFile = TEXT("crashdump-00-00-00.dmp");
-    wsprintfW(&sMinidumpFile[0], TEXT("crashdump-%02d-%02d-%02d.dmp"), st.wHour, st.wMinute, st.wSecond);
+    std::wstring sMinidumpFile = TEXT("crashdump-000000-00-00-00-00-00.dmp");
+    wsprintfW(&sMinidumpFile[0], TEXT("crashdump-%06d-%02d-%02d-%02d-%02d-%02d.dmp"),
+            m_dwProcessId, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
 
     std::wstring sErrorMsg;
 
@@ -274,12 +285,71 @@ int MiniDumpper::OnMinidumpProgress(void * const CallbackInput,
 
 std::wstring MiniDumpper::FormatErrorMsg(DWORD dwErrorCode)
 {
-    LPTSTR msg = 0;
+    LPTSTR msg = nullptr;
     FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM|FORMAT_MESSAGE_ALLOCATE_BUFFER,
-        NULL, dwErrorCode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-        (LPTSTR)&msg, 0, NULL);
+        nullptr, dwErrorCode, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                  reinterpret_cast<LPTSTR>(&msg), 0, nullptr);
     std::wstring str = msg;
     GlobalFree(msg);
     return str;
 }
 
+int MiniDumpper::FindProcessId(std::wstring const & name)
+{
+    int pid = 0;
+    HANDLE hProcSnapshot = ::CreateToolhelp32Snapshot( TH32CS_SNAPPROCESS, 0 );
+    if( INVALID_HANDLE_VALUE != hProcSnapshot )
+    {
+        FILETIME lpCreationTime;
+        FILETIME lpExitTime;
+        FILETIME lpKernelTime;
+        FILETIME lpUserTime;
+        FILETIME lpCreationTime2 = {0, 0};
+        PROCESSENTRY32 procEntry;
+        procEntry.dwSize = sizeof(PROCESSENTRY32);
+        if( ::Process32First( hProcSnapshot, &procEntry ) )
+        {
+            do
+            {
+                HANDLE hModSnapshot = ::CreateToolhelp32Snapshot( TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, procEntry.th32ProcessID );
+                if( INVALID_HANDLE_VALUE != hModSnapshot )
+                {
+                    MODULEENTRY32 modEntry;
+                    modEntry.dwSize = sizeof( MODULEENTRY32 );
+                    if( Module32First( hModSnapshot, &modEntry ) )
+                    {
+                        //wprintf(TEXT("Module %s\n"), modEntry.szModule);
+                        if( name == modEntry.szModule )
+                        {
+                            ::CloseHandle( hModSnapshot );
+                            wprintf(TEXT("Process %d\n"), procEntry.th32ProcessID);
+
+                            HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS,
+                                                       FALSE, procEntry.th32ProcessID);
+                            ::GetProcessTimes(hProc,
+                                              &lpCreationTime,
+                                              &lpExitTime,
+                                              &lpKernelTime,
+                                              &lpUserTime);
+                            ::CloseHandle(hProc);
+                            if (CompareFileTime(&lpCreationTime, &lpCreationTime2) > 0)
+                            {
+                                pid = procEntry.th32ProcessID;
+                                lpCreationTime2 = lpCreationTime;
+                            }
+                        }
+                    }
+                    ::CloseHandle( hModSnapshot );
+                }
+                else
+                {
+                    //auto msg = FormatErrorMsg(GetLastError());
+                    //wprintf(TEXT("Process %d %x\n"), procEntry.th32ProcessID, GetLastError());
+                }
+            }
+            while( ::Process32Next( hProcSnapshot, &procEntry ) );
+        }
+        ::CloseHandle( hProcSnapshot );
+    }
+    return pid;
+}

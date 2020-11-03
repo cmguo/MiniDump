@@ -15,14 +15,12 @@ int main()
     if(argc < 2)
         return 1; // No arguments passed, exit.
 
-    int pid = wcstol(argv[1], nullptr, 10);
-
     int interval = 0;
 
     if (argc > 2)
         interval = wcstol(argv[2], nullptr, 10);
 
-    MiniDumpper dumpper(pid);
+    MiniDumpper dumpper(argv[1]);
 
     dumpper.CreateMiniDump();
 
