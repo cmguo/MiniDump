@@ -1,3 +1,4 @@
+#include "fontdump.h"
 #include "minidumpper.h"
 
 #include <Windows.h>
@@ -14,6 +15,13 @@ int main()
     // Check parameter count.
     if(argc < 2)
         return 1; // No arguments passed, exit.
+
+    if (argv[1] == std::wstring(L"font")) {
+        FontDump font;
+        font.populateFontDatabase();
+        getchar();
+        return 0;
+    }
 
     int interval = 0;
 
